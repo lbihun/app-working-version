@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Trading Signals Extension",
+  "version": "1.0",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://fapi.binance.com/*", "https://api.binance.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+		"default_icon": {
+            "16": "icons7/icon16.png",
+            "48": "icons7/icon48.png",
+            "128": "icons7/icon128.png"
+        }
+  }
+}
