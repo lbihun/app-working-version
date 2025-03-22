@@ -6,23 +6,49 @@
     <title>Сигнали Binance</title>
     <style>
         body {
-            width: 300px;
+            width: 320px;
             font-family: Arial, sans-serif;
             padding: 10px;
+            background-color: #f5f5f5;
         }
         h2 {
             font-size: 16px;
             margin-bottom: 10px;
         }
-        #signals-list {
+        #filter {
+            margin-bottom: 10px;
+            width: 100%;
+            padding: 5px;
             font-size: 14px;
+        }
+        .signal-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 10px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        .buy {
+            border-left: 5px solid #4CAF50;
+        }
+        .sell {
+            border-left: 5px solid #F44336;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
     <h2>Сигнали на Binance Futures</h2>
+    <select id="filter">
+        <option value="all">Усі</option>
+        <option value="BUY">Тільки BUY</option>
+        <option value="SELL">Тільки SELL</option>
+    </select>
     <div id="signals-list">Завантаження...</div>
     <script src="popup.js"></script>
 </body>
 </html>
-

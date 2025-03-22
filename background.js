@@ -49,14 +49,29 @@ try {
 		console.log(`📊 ${symbol} - Price: ${price}, RSI: ${rsi}, Stochastic: ${stochastic}`);
 	
 		let direction = null;
-		let takeProfit = null;
-		let leverage = "x5";
-	
+let takeProfit = null;
+let leverage = "x5";
+		let tradeDuration = 1; // значення за замовчуванням
+		await new Promise(resolve => {
+			chrome.storage.local.get(["tradeDuration"], (data) => {
+				if (data.tradeDuration) {
+					tradeDuration = parseInt(data.tradeDuration);
+				}
+				resolve();
+			});
+		});
+		
+
 		const confidence = ((100 - Math.abs(rsi - 50)) + (100 - Math.abs(stochastic - 50))) / 2;
 	
-		if (confidence >= 80) {
+		if (confidence >= 85) {
 			direction = rsi < 50 ? "BUY" : "SELL";
-			takeProfit = (price * (direction === "BUY" ? 1.5 : 0.5)).toFixed(2);
+			if (tradeDuration === 1) {
+				takeProfit = (price * (direction === "BUY" ? 1.5 : 0.5)).toFixed(2); // +50%
+			} else if (tradeDuration === 2) {
+				takeProfit = (price * (direction === "BUY" ? 2.0 : 0.3)).toFixed(2); // +100%+
+			}
+			
 		}
 		
 	

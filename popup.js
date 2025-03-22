@@ -1,24 +1,38 @@
 document.addEventListener("DOMContentLoaded", () => {
-    const signalsContainer = document.getElementById("signals-list");
+	const signalsContainer = document.getElementById("signals-list");
+	const filterSelect = document.getElementById("filter");
 
-    chrome.storage.local.get("signals", (data) => {
-        if (!data || !data.signals || data.signals.length === 0) {
-            signalsContainer.textContent = "Немає активних сигналів";
-            return;
-        }
+	function renderSignals(signals, filter) {
+			signalsContainer.innerHTML = "";
 
-        signalsContainer.textContent = ""; // Очищення перед додаванням
+			const filtered = filter === "all"
+					? signals
+					: signals.filter(signal => signal.direction === filter);
 
-        data.signals.forEach(signal => {
-            const signalElement = document.createElement("div");
-            signalElement.innerHTML = `
-                <strong>${signal.symbol}</strong> - ${signal.direction} 
-                <br> <strong>Take Profit:</strong> ${signal.takeProfit} 
-                <br> <strong>Confidence:</strong> ${signal.confidence}%
-                <br> <strong>Recommended Leverage:</strong> ${signal.leverage}x
-                <hr>
-            `;
-            signalsContainer.appendChild(signalElement);
-        });
-    });
+			if (filtered.length === 0) {
+					signalsContainer.textContent = "Немає сигналів за обраним фільтром";
+					return;
+			}
+
+			filtered.forEach(signal => {
+					const signalElement = document.createElement("div");
+					signalElement.className = `signal-card ${signal.direction.toLowerCase()}`;
+					signalElement.innerHTML = `
+							<strong>${signal.symbol}</strong> - ${signal.direction}
+							<br><strong>Take Profit:</strong> ${signal.takeProfit} 
+							<br><strong>Confidence:</strong> ${signal.confidence} 
+							<br><strong>Leverage:</strong> ${signal.leverage}
+					`;
+					signalsContainer.appendChild(signalElement);
+			});
+	}
+
+	chrome.storage.local.get("signals", (data) => {
+			const allSignals = data.signals || [];
+			renderSignals(allSignals, filterSelect.value);
+
+			filterSelect.addEventListener("change", () => {
+					renderSignals(allSignals, filterSelect.value);
+			});
+	});
 });
