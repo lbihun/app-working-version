@@ -2,21 +2,27 @@ document.addEventListener("DOMContentLoaded", () => {
 	const signalsContainer = document.getElementById("signals-list");
 	const filterSelect = document.getElementById("filter");
 	const refreshButton = document.getElementById("refresh");
+	const debugToggle = document.getElementById("debugToggle");
 
 	// Рендер сигналів на основі фільтра
 	function renderSignals(signals, filter) {
 		signalsContainer.innerHTML = "";
 		console.log("🔎 Активний фільтр:", filter);
 
-		const cleaned = signals.filter(s => s.direction === "BUY" || s.direction === "SELL");
+		const debugMode = debugToggle.checked;
+		const cleaned = signals.filter(s =>
+			s.direction?.toUpperCase() === "BUY" || s.direction?.toUpperCase() === "SELL"
+		);
 
-const filtered = filter === "all"
-	? cleaned
-	: cleaned.filter(signal => signal.direction === filter);
-	console.log("🧮 Відфільтровані сигнали:", filtered);
-	
+		console.log("🧪 Всі сигнали:", signals);
+		console.log("🧼 Cleaned сигнали:", cleaned.map(s => s.direction));
 
+		const normalizedFilter = filter.toUpperCase();
+		const filtered = normalizedFilter === "УСІ"
+			? cleaned
+			: cleaned.filter(signal => signal.direction?.toUpperCase() === normalizedFilter);
 
+		console.log("🧮 Відфільтровані сигнали:", filtered);
 
 		if (filtered.length === 0) {
 			signalsContainer.textContent = "Немає сигналів за обраним фільтром";
@@ -26,29 +32,35 @@ const filtered = filter === "all"
 		filtered.forEach(signal => {
 			const signalElement = document.createElement("div");
 			signalElement.className = `signal-card ${signal.direction.toLowerCase()}`;
+
 			signalElement.innerHTML = `
 				<strong>${signal.symbol}</strong> - ${signal.direction}
 				<br><strong>Take Profit:</strong> ${signal.takeProfit}
 				<br><strong>Confidence:</strong> ${signal.confidence}
 				${signal.expectedTime ? `<br><strong>Очікуваний час:</strong> ${signal.expectedTime}` : ""}
+				${debugMode ? `
+					<br><small>
+						Price: ${signal.price} | TP: ${signal.takeProfit}<br>
+						MACD: ${signal.macd ?? "?"}, Signal: ${signal.macdSignal ?? "?"}, Hist: ${signal.macdHistogram ?? "?"}
+					</small>` : ""}
 			`;
+
 			signalsContainer.appendChild(signalElement);
 		});
 	}
 
-	// Отримання сигналів із storage
+	// Завантаження сигналів із chrome.storage
 	function loadSignals() {
 		chrome.storage.local.get("signals", (data) => {
 			const allSignals = data.signals || [];
-			console.log("📥 Завантажено сигнали в popup:", allSignals);
+			console.log("📦 Отримано збережені сигнали:", allSignals);
 			renderSignals(allSignals, filterSelect.value);
 		});
 	}
 
-	// Слухач фільтру
+	// Обробники подій
 	filterSelect.addEventListener("change", loadSignals);
-
-	// Кнопка "Оновити сигнали"
+	debugToggle.addEventListener("change", loadSignals);
 	refreshButton.addEventListener("click", () => {
 		chrome.runtime.sendMessage({ action: "manualRefresh" }, (response) => {
 			if (chrome.runtime.lastError) {
@@ -56,11 +68,11 @@ const filtered = filter === "all"
 				signalsContainer.textContent = "❌ Немає зʼєднання з бекграундом";
 				return;
 			}
-			console.log("✅ Відповідь на ручне оновлення:", response);
-			loadSignals();
+			console.log("🔄 Сигнали оновлено вручну:", response?.signals || []);
+			renderSignals(response.signals || [], filterSelect.value);
 		});
-		
 	});
 
-	loadSignals(); // Запуск при відкритті popup
+	// Початкове завантаження
+	loadSignals();
 });

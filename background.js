@@ -16,7 +16,8 @@ async function fetchVolume(symbol, interval = "1h") {
   }
 }
 
-const MIN_VOLUME = 500000; // Мінімальний денний обсяг, наприклад — 500K USDT
+const MIN_VOLUME = 10; // debug режим
+
 
 async function getAllFuturesSymbols() {
 	const url = "https://fapi.binance.com/fapi/v1/exchangeInfo";
@@ -40,7 +41,10 @@ async function getAllFuturesSymbols() {
 				s.status === "TRADING" &&
 				!s.symbol.includes("1000") &&  // Наприклад: уникнути 1000LUNC/1000PEPE
 				!s.symbol.includes("DOWN") &&
-				!s.symbol.includes("UP")
+				!s.symbol.includes("UP"),
+				!s.symbol.includes("TEST") && !s.symbol.includes("1000") &&
+!s.symbol.includes("UP") && !s.symbol.includes("DOWN")
+
 			)
 			.map(s => s.symbol);
 
@@ -95,11 +99,12 @@ function calcEMA(prices, period = 14) {
 	let ema1h = prices[prices.length - period];
 
 	for (let i = prices.length - period + 1; i < prices.length; i++) {
-		ema1h = prices[i] * k + ema * (1 - k);
+		ema1h = prices[i] * k + ema1h * (1 - k); // 🔁 виправлено на ema1h
 	}
 
 	return parseFloat(ema1h.toFixed(2));
 }
+
 
 
 function calcstochastic1h(prices, period = 14) {
@@ -136,20 +141,22 @@ function calcMACD(prices, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
 	// EMA для fast і slow
 	function getEMA(data, period) {
 		const k = 2 / (period + 1);
-		let ema1h = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+		let ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
 		for (let i = period; i < data.length; i++) {
-			ema1h = data[i] * k + ema * (1 - k);
+			ema = data[i] * k + ema * (1 - k);
 		}
 		return ema;
 	}
+	
 
 	const macdLineArray = [];
 
 	for (let i = slowPeriod; i <= prices.length; i++) {
 		const slice = prices.slice(i - slowPeriod, i);
-		const ema1hEMA = getEMA(slice.slice(-fastPeriod), fastPeriod);
-		const slowema1h = getEMA(slice, slowPeriod);
-		macdLineArray.push(fastema1h - slowema1h);
+		const fastEMA = getEMA(slice.slice(-fastPeriod), fastPeriod);
+const slowEMA = getEMA(slice, slowPeriod);
+macdLineArray.push(fastEMA - slowEMA);
+
 	}
 
 	const signalLine = getEMA(macdLineArray.slice(-signalPeriod), signalPeriod);
@@ -186,11 +193,6 @@ async function analyzeAndGenerateSignal(symbol, history) {
   // Визначаємо напрямок
   let rawDirection = rsi1h < 50 ? "BUY" : "SELL";
   let direction = null; // оголошуємо direction локально в межах цієї функції
-
-  // Визначаємо напрямок угоди на основі індикаторів
-  if ((rawDirection === "BUY" && price > ema1h) || (rawDirection === "SELL" && price < ema1h)) {
-    direction = rawDirection;
-  }
 
   // Перевірка на необхідні дані
   if (!price || !ema1h || stochastic1h === null || !atr1h || atr1h === 0) {
@@ -244,7 +246,7 @@ globalThis.fetchSignals = fetchSignals;
 async function fetchSignals() {
 	const url = "https://fapi.binance.com/fapi/v1/ticker/price";
 	
-
+	
 	try {
 		const response = await fetch(url);
 		const data = await response.json();
@@ -255,20 +257,36 @@ async function fetchSignals() {
 		}
 
 		let signals = [];
-
+		let rawDirection = null;
+		let direction = null;
+		
 		for (const asset of data) {
 			const symbol = asset.symbol;
 			const price = parseFloat(asset.price);
 			const volume = await fetchVolume(symbol, "1h");
-if (!volume || volume < 100000) {
+if (!volume || volume < 10) {
   console.log(`⚠️ ${symbol} → Низький обсяг: ${volume}`);
   continue;
 }
+if (!symbol || !/^[A-Z]{3,15}USDT$/.test(symbol)) {
+	console.warn(`⛔️ Пропущено недійсний символ: ${symbol}`);
+	continue;
+}
 
-			// Ініціалізація історії
-			if (!historicalPrices[symbol] || historicalPrices[symbol].length === 0) {
-				historicalPrices[symbol] = Array(15).fill(price);
-			} else {
+	if (!symbol || !/^[A-Z]{3,15}USDT$/.test(symbol)) {
+		console.warn(`⛔️ Пропущено недійсний символ: ${symbol}`);
+		continue;
+	}
+
+		// Ініціалізація історії
+		if (!historicalPrices[symbol]) {
+			// Завантажити історію цін одразу
+			const historyData = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1h&limit=50`);
+			const candles = await historyData.json();
+			const closePrices = candles.map(c => parseFloat(c[4]));
+		
+			historicalPrices[symbol] = closePrices;
+		} else {
 				if (historicalPrices[symbol][historicalPrices[symbol].length - 1] !== price) {
 					historicalPrices[symbol].push(price);
 					if (historicalPrices[symbol].length > 30) {
@@ -276,6 +294,12 @@ if (!volume || volume < 100000) {
 					}
 				}
 			}
+			const history = historicalPrices[symbol] || [];
+if (history.length < 35) continue;
+
+const macd = calcMACD(history);
+			if (!macd) continue;
+
 
 			console.log(`🕒 ${symbol} - Last 5 Prices:`, historicalPrices[symbol].slice(-5));
 
@@ -291,11 +315,20 @@ if (!volume || volume < 100000) {
 			
 			const atr1h = await fetchATR(symbol, 14, "1h");
 			const atr4h = await fetchATR(symbol, 14, "4h");
+			rawDirection = rsi1h < 50 ? "BUY" : "SELL";
+
+if (rawDirection === "BUY" && price > ema1h && price > ema4h && macd.macd > macd.signal) {
+	direction = "BUY";
+}
+if (rawDirection === "SELL" && price < ema1h && price < ema4h && macd.macd < macd.signal) {
+	direction = "SELL";
+}
+
 			
 			let confidence = ((100 - Math.abs(rsi1h - 50)) + (100 - Math.abs(stochastic1h - 50))) / 2;
 			if (confidence < 50 ) {
 				console.log(`⚠️ ${symbol} → Confidence занизький: ${confidence.toFixed(2)}%`);
-				continue;
+				//continue;
 			}
 			if (!ema1h || !atr1h || stochastic1h === null || typeof rsi1h === "undefined") {
 				console.warn(`⚠️ ${symbol} → Пропущено через: ema1h=${ema1h}, atr1h=${atr1h}, stochastic1h=${stochastic1h}, rsi1h=${rsi1h}`);
@@ -321,21 +354,7 @@ if (!volume || volume < 100000) {
 				});
 			});
 
-			let direction = null;
-			let rawDirection = rsi1h < 50 && rsi4h < 50 ? "BUY" :
-                   rsi1h > 50 && rsi4h > 50 ? "SELL" : null;
 			
-									 if (rawDirection === "BUY" && price > ema1h && price > ema4h) {
-										direction = "BUY";
-									 }
-									 if (rawDirection === "SELL" && price < ema1h && price < ema4h) {
-										direction = "SELL";
-									}
-
-			if (!direction) {
-				console.log(`⚠️ ${symbol} → Direction не визначено`);
-				continue;
-			}
 
 			// Пошук рівня підтримки / супротиву
 			const levels1h = await getCachedSupportResistance(symbol, "1h", 100, 3);
@@ -363,25 +382,42 @@ const supportResistance = [...levels1h, ...levels4h];
 			let takeProfit = null;
 			let tpSource = "atr1h";
 
-			
-			// Перевірка для визначення напрямку
-			if ((rawDirection === "BUY" && price > ema1h) || (rawDirection === "SELL" && price < ema1h)) {
-					direction = rawDirection;
-			
-			
-			// Якщо direction не визначено, задати стандартне значення
-			if (!direction) {
-				console.log(`⚠️ ${symbol} → Direction не визначено, використовуємо стандартне значення: ${rawDirection}`);
-				direction = rawDirection; // Призначити напрямок, якщо не вдалося визначити
-			}
-			if (nearestLevel) {
-				takeProfit = nearestLevel.price.toFixed(4);
-				tpSource = "S/R";
-			} else {
-				takeProfit = (direction === "BUY")
-					? (price + atr1h * atrMultiplier).toFixed(4)
-					: (price - atr1h * atrMultiplier).toFixed(4);
-			}
+			// Початково direction undefined
+direction = null;
+
+// Спершу перевіримо повну відповідність сигналам
+if ((rawDirection === "BUY" && price > ema1h && macd.macd > macd.signal) ||
+    (rawDirection === "SELL" && price < ema1h && macd.macd < macd.signal)) {
+	direction = rawDirection;
+	console.log(`📈 ${symbol} → Direction підтверджено за MACD`);
+} else {
+	// fallback: встановлюємо напрямок хоча б на основі RSI
+	direction = rawDirection;
+	console.log(`⚠️ ${symbol} → Direction fallback до rawDirection: ${rawDirection}`);
+}
+
+			const atrBasedTP = (direction === "BUY")
+  ? price + atr1h * atrMultiplier
+  : price - atr1h * atrMultiplier;
+
+if (nearestLevel) {
+  const levelTP = nearestLevel.price;
+  const levelProfit = direction === "BUY"
+    ? ((levelTP - price) / price) * 100
+    : ((price - levelTP) / price) * 100;
+
+  if (levelProfit >= 50) {
+    takeProfit = levelTP.toFixed(4);
+    tpSource = "S/R";
+  } else {
+    takeProfit = atrBasedTP.toFixed(4);
+    tpSource = "ATR fallback";
+  }
+} else {
+  takeProfit = atrBasedTP.toFixed(4);
+  tpSource = "ATR only";
+}
+
 
 			const targetPrice = parseFloat(takeProfit);
 			const targetMove = Math.abs(price - targetPrice);
@@ -394,31 +430,51 @@ const supportResistance = [...levels1h, ...levels4h];
 			const profitPercent = direction === "BUY"
 				? ((targetPrice - price) / price) * 100
 				: ((price - targetPrice) / price) * 100;
+				if (profitPercent < 1) {
+					console.log(`⛔️ ${symbol} → Недостатній прибуток: ${profitPercent.toFixed(2)}%`);
+					//continue;
+				}
+				
 
 			//if (profitPercent < 40) {
 				//console.log(`⚠️ ${symbol} → Недостатній потенціал: ${profitPercent.toFixed(2)}%`);
 				//continue;
 			//}
 
-			if (targetMove <= maxMoveIn2Days) {
+				if (targetMove <= maxMoveIn2Days) {
+					console.log(`✅ ${symbol} → Dir: ${direction}, Profit: ${profitPercent.toFixed(2)}%, TP: ${takeProfit}, Source: ${tpSource}, RSI: ${rsi1h}/${rsi4h}, EMA: ${ema1h}/${ema4h}, MACD: ${macd.macd}/${macd.signal}`);
+
+					if (!direction) {
+						console.warn(`⚠️ ${symbol} → Direction undefined, сигнал не буде додано`);
+						continue;
+					}
+					
 				signals.push({
 					symbol: symbol,
 					price: price,
 					direction: direction,
 					confidence: `${confidence.toFixed(2)}%`,
 					takeProfit: `${takeProfit} USDT`,
-					expectedTime: `${expectedDays} days`
-				});
+					expectedTime: `${expectedDays} days`,
+				  macd: macd.macd,
+					macdSignal: macd.signal,
+					macdHistogram: macd.histogram
+					});
 			}
 		}
+		if (!signals.length) {
+			console.warn("⚠️ Немає сигналів для збереження!");
+		} else {
+			console.log("💾 Збереження сигналів у storage:", signals);
+		}
+		
 			chrome.storage.local.set({ signals });
 			console.log("💾 Збережені сигнали:", signals);
+			console.log("✅ Сформовано сигналів:", signals.length);
 
-		}
 		// Збереження сигналів
 		console.log("✅ Сформовані сигнали:", signals);
 		console.log("📦 Сигнали перед збереженням:", signals);
-
 
 		chrome.storage.local.get("signals", data => {
 			console.log("📥 Перевірка сигналів після збереження:", data.signals);
@@ -427,131 +483,142 @@ const supportResistance = [...levels1h, ...levels4h];
 		chrome.storage.local.get("signals", data => {
 			console.log("✅ Збережені сигнали:", data.signals);
 		});
-
+		
 	} catch (error) {
 		console.error("❌ Error fetching signals:", error);
 		chrome.storage.local.set({ signals: [] });
 	}
 }
 
+
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 	if (request.action === "manualRefresh") {
 		console.log("🔁 Отримано запит на ручне оновлення");
 		fetchSignals().then(() => {
-			sendResponse({ success: true });
+			chrome.storage.local.get("signals", (data) => {
+				sendResponse({ success: true, signals: data.signals || [] });
+			});
 		});
-		return true; // залишити канал відкритим для async sendResponse
+		return true; // залишаємо канал відкритим для async sendResponse
 	}
 });
+	
 
 
-async function fetchEMA(symbol, period = 14, interval = "1h") {
-  const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period + 1}`;
-
-
+	async function fetchEMA(symbol, period = 14, interval = "1h") {
+		const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period + 1}`;
+  
 		try {
 			const response = await fetch(url);
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
 			const data = await response.json();
-			if (!Array.isArray(data) || data.length <= period) return null;
+			if (!Array.isArray(data) || data.length < period + 1) {
+				console.error(`⚠️ Некоректні дані EMA для ${symbol}:`, data);
+				return null;
+			}
 
 			const closes = data.map(candle => parseFloat(candle[4]));
-		
-			let k = 2 / (period + 1);
-			let ema1h = closes[0];
-			for (let i = 1; i < closes.length; i++) {
-				ema1h = closes[i] * k + ema1h * (1 - k);
-			}
-			return parseFloat(ema1h.toFixed(2));
-		} catch (error) {
-			console.error(`❌ EMA error for ${symbol}:`, error);
-			return null;
-		}
-	}
+			const k = 2 / (period + 1);
+			let ema = closes[0];
 
-	async function fetchATR(symbol, period = 14, interval = "1h") {
-		const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period + 1}`;
-	
-		try {
-			const response = await fetch(url);
-			const data = await response.json();
-			if (!Array.isArray(data) || data.length <= period) return null;
-			if (!Array.isArray(data) || data.length < period) {
-				console.warn(`⚠️ ${symbol} → недостатньо даних (${data.length})`);
-				return 50;
+			for (let i = 1; i < closes.length; i++) {
+				ema = closes[i] * k + ema * (1 - k);
 			}
-	
-			let trList = [];
-			for (let i = 1; i < data.length; i++) {
-				const high = parseFloat(data[i][2]);
-				const low = parseFloat(data[i][3]);
-				const prevClose = parseFloat(data[i - 1][4]);
-				const tr = Math.max(
-					high - low,
-					Math.abs(high - prevClose),
-					Math.abs(low - prevClose)
-				);
-				trList.push(tr);
-			}
-	
-			const atr1h = trList.reduce((sum, val) => sum + val, 0) / period;
-			return atr1h;
+
+			return parseFloat(ema.toFixed(2));
 		} catch (error) {
-			console.error(`❌ ATR error for ${symbol}:`, error);
+			console.error(`❌ Помилка отримання EMA для ${symbol}:`, error.message);
 			return null;
 		}
 	}
+	
+
+async function fetchATR(symbol, period = 14, interval = "1h") {
+  const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period + 1}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length < period) {
+      console.error(`⚠️ Некоректна довжина даних для ATR для ${symbol}`);
+      return null;
+    }
+
+    let trList = [];
+    for (let i = 1; i < data.length; i++) {
+      const high = parseFloat(data[i][2]);
+      const low = parseFloat(data[i][3]);
+      const prevClose = parseFloat(data[i - 1][4]);
+      const tr = Math.max(
+        high - low,
+        Math.abs(high - prevClose),
+        Math.abs(low - prevClose)
+      );
+      trList.push(tr);
+    }
+
+    const atr1h = trList.reduce((sum, val) => sum + val, 0) / period;
+    return atr1h;
+  } catch (error) {
+    console.error(`❌ ATR error for ${symbol}:`, error);
+    return null;
+  }
+}
+
+	
 	
 
 // Функція для розрахунку rsi1h
-	async function fetchRSI(symbol, period = 14, interval = "1h") {
-		const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period + 1}`;
+async function fetchRSI(symbol, period = 14, interval = "1h") {
+  const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period + 1}`;
+  
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length < period + 1) {
+      console.error(`⚠️ Некоректні дані RSI для ${symbol}:`, data);
+      return 50;
+    }
 
-		try {
-			const response = await fetch(url);
-			const data = await response.json();
-			if (data.msg) {
-				console.warn(`⚠️ Binance API повернув помилку для ${symbol}: ${data.msg}`);
-				return 50;
-			}
-		
-			if (!Array.isArray(data) || data.length < period + 1 || !Array.isArray(data[0])) {
-				console.error(`❌ Binance API повернуло некоректні дані для RSI:`, JSON.stringify(data, null, 2));
-				return 50;
-			}
-		
-			let gains = 0, losses = 0;
-			for (let i = 1; i < data.length; i++) {
-				let diff = parseFloat(data[i][4]) - parseFloat(data[i - 1][4]);
-				if (diff > 0) gains += diff;
-				else losses += Math.abs(diff);
-			}
-		
-			let avgGain = gains / period;
-			let avgLoss = losses / period;
-			let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-			let rsi1h = 100 - (100 / (1 + rs));
-			return rsi1h.toFixed(2);
-		} catch (error) {
-			console.error(`❌ Помилка отримання RSI для ${symbol}:`, error);
-			return 50;
-		}
-	}
+    let gains = 0, losses = 0;
+    for (let i = 1; i < data.length; i++) {
+      let diff = parseFloat(data[i][4]) - parseFloat(data[i - 1][4]);
+      if (diff > 0) gains += diff;
+      else losses += Math.abs(diff);
+    }
+
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+    let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    let rsi = 100 - (100 / (1 + rs));
+    return parseFloat(rsi.toFixed(2));
+  } catch (error) {
+    console.error(`❌ Помилка отримання RSI для ${symbol}:`, error.message);
+    return 50;
+  }
+}
+
 	
-		
-	
-	
+
 	
 	// Функція для розрахунку Stochastic
 	async function fetchStochastic(symbol, period = 14, interval = "1h") {
 		const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${period}`;
-	
+		
 		try {
 			const response = await fetch(url);
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			
 			const data = await response.json();
-	
-			if (!Array.isArray(data) || data.length < period || !Array.isArray(data[0])) {
-				console.error(`❌ Недостатньо даних для ${symbol}:`, data);
-				return null;
+			if (!Array.isArray(data) || data.length < period) {
+				console.error(`⚠️ Некоректні дані Stochastic для ${symbol}:`, data);
+				return 50;
 			}
 	
 			let highs = data.map(candle => parseFloat(candle[2]));
@@ -567,10 +634,11 @@ async function fetchEMA(symbol, period = 14, interval = "1h") {
 			let stochastic = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
 			return Math.min(Math.max(stochastic, 0), 100);
 		} catch (error) {
-			console.error(`❌ Помилка при запиті Stochastic для ${symbol}:`, error);
+			console.error(`❌ Помилка отримання Stochastic для ${symbol}:`, error.message);
 			return 50;
 		}
 	}
+	
 	
 
 async function fetchSupportResistance(symbol, interval = "1h", limit = 100, range = 3) {
@@ -643,7 +711,7 @@ async function fetchSupportResistance(symbol, interval = "1h", limit = 100, rang
 			fetch(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`)
 				.then(response => response.json())
 				.then(data => {
-					sendResponse({ success: true, data: data });
+					sendResponse({ success: true, data });
 				})
 				.catch(error => {
 					console.error("❌ Помилка Binance API для", symbol, error);
@@ -652,6 +720,7 @@ async function fetchSupportResistance(symbol, interval = "1h", limit = 100, rang
 			return true;
 		}
 	});
+
 	
 	async function getCachedSupportResistance(symbol, interval = "1h", limit = 100, range = 3) {
 		const cacheKey = `sr_${symbol}_${interval}`;
@@ -676,9 +745,9 @@ async function fetchSupportResistance(symbol, interval = "1h", limit = 100, rang
 				}
 			});
 		});
-	}
+	};
 	
 	// Додатковий збір сигналів раз на 10 хвилин
 	setInterval(fetchSignals, 10 * 60 * 1000); // 10 хвилин
 
-		fetchSignals();
+	fetchSignals();

@@ -45,11 +45,19 @@
 	<h2>Сигнали на Binance Futures</h2>
 	<button id="refresh" style="margin-bottom: 10px; width: 100%; padding: 5px;">🔄 Оновити сигнали</button>
 	
-    <select id="filter">
-        <option value="all">Усі</option>
-        <option value="BUY">Тільки BUY</option>
-        <option value="SELL">Тільки SELL</option>
-    </select>
+  <select id="filter">
+		<option value="УСІ">Усі</option>
+		<option value="BUY">BUY</option>
+		<option value="SELL">SELL</option>
+	</select>
+	
+		<div style="margin: 5px 0;">
+			<label>
+				<input type="checkbox" id="debugToggle" />
+				Режим Debug
+			</label>
+		</div>
+		
     <div id="signals-list">Завантаження...</div>
     <script src="popup.js"></script>
 </body>
